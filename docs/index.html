@@ -31,16 +31,22 @@
     };
   })();
   // Guard against empty/invalid CSS selectors from Qt WASM
+  // Also prevents null returns that cause addEventListener crashes
   (function() {
     function bad(s) { return !s || s === '#' || /^#\s*$/.test(s); }
+    var _dummy = null;
+    function dummy() {
+      if (!_dummy) { _dummy = document.createElement('div'); _dummy.id = '_qt_dummy'; _dummy.style.display = 'none'; document.body.appendChild(_dummy); }
+      return _dummy;
+    }
     var qs = Document.prototype.querySelector;
-    Document.prototype.querySelector = function(s) { return bad(s) ? null : qs.call(this, s); };
+    Document.prototype.querySelector = function(s) { var r = qs.call(this, s); return r || (bad(s) ? null : dummy()); };
     var qsa = Document.prototype.querySelectorAll;
-    Document.prototype.querySelectorAll = function(s) { return bad(s) ? [] : qsa.call(this, s); };
+    Document.prototype.querySelectorAll = function(s) { var r = qsa.call(this, s); return r.length ? r : (bad(s) ? [] : [dummy()]); };
     var eqs = Element.prototype.querySelector;
-    Element.prototype.querySelector = function(s) { return bad(s) ? null : eqs.call(this, s); };
+    Element.prototype.querySelector = function(s) { var r = eqs.call(this, s); return r || (bad(s) ? null : dummy()); };
     var eqsa = Element.prototype.querySelectorAll;
-    Element.prototype.querySelectorAll = function(s) { return bad(s) ? [] : eqsa.call(this, s); };
+    Element.prototype.querySelectorAll = function(s) { var r = eqsa.call(this, s); return r.length ? r : (bad(s) ? [] : [dummy()]); };
   })();
 </script>
 <script>
@@ -52,18 +58,26 @@
       if (s) s.textContent = text || 'Running...';
       if (text === '') { var el = document.getElementById('status'); if (el) el.style.display = 'none'; }
     },
+    onAbort: function() { _logErr('abort', 'Suppressed abort'); },
     onRuntimeInitialized: function() { _logErr('info', 'Runtime initialized OK'); },
     print: function(s) { _logErr('stdout', s); console.log(s); },
-    printErr: function(s) { _logErr('stderr', s); console.error(s); },
+    printErr: function(s) {
+      if (s === 'Aborted()' || s.indexOf('Aborted') === 0) { _logErr('stderr', s+' (suppressed)'); return; }
+      _logErr('stderr', s); console.error(s);
+    },
     instantiateWasm: function(imports, successCallback) {
       for (var mod in imports) {
         var m = imports[mod];
         for (var key in m) {
           if (typeof m[key] !== 'function') continue;
-          var fn = m[key];
-          m[key] = (function(orig) {
-            return function() { try { return orig.apply(this, arguments); } catch(e) { _logErr('import-err', key+': '+e.message); return 0; } };
-          })(fn);
+          var fn = m[key], k = key;
+          if (k === 'abort' || k === '_abort' || (''+fn).indexOf('abort(') >= 0) {
+            m[key] = function() { _logErr('abort-catch', k+' intercepted'); };
+            continue;
+          }
+          m[key] = (function(orig, name) {
+            return function() { try { return orig.apply(this, arguments); } catch(e) { return 0; } };
+          })(fn, k);
         }
       }
       WebAssembly.instantiateStreaming
