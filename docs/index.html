@@ -99,10 +99,10 @@
         }
       }
       WebAssembly.instantiateStreaming
-        ? WebAssembly.instantiateStreaming(fetch('lmms.wasm?v=patched'), imports).then(
+        ? WebAssembly.instantiateStreaming(fetch('lmms.wasm?v=nocall'), imports).then(
             function(r) { successCallback(r.instance, r.module); },
             function(e) { Module.printErr('WASM instantiation failed: ' + e); throw e; })
-        : WebAssembly.instantiate(fetch('lmms.wasm?v=patched').then(function(r) { return r.arrayBuffer(); }), imports).then(
+        : WebAssembly.instantiate(fetch('lmms.wasm?v=nocall').then(function(r) { return r.arrayBuffer(); }), imports).then(
             function(r) { successCallback(r.instance, r.module); },
             function(e) { Module.printErr('WASM instantiation failed: ' + e); throw e; });
       return {};
