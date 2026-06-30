@@ -16,6 +16,7 @@
 <div id="status"><div class="spinner"></div>Loading LMMS&hellip;</div>
 <script>
   var Module = {
+    arguments: ['--allowroot'],
     canvas: (function() { var c = document.createElement('canvas'); c.id = 'qt-canvas'; document.body.appendChild(c); return c; })(),
     setStatus: function(text) {
       var s = document.getElementById('status');
