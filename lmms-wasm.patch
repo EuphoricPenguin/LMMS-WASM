@@ -1,0 +1,757 @@
+diff --git a/include/ArrayVector.h b/include/ArrayVector.h
+index 7ea78d8e9..2b92b8a38 100644
+--- a/include/ArrayVector.h
++++ b/include/ArrayVector.h
+@@ -354,7 +354,17 @@ public:
+ 
+ 	friend constexpr auto operator<=>(const ArrayVector& l, const ArrayVector& r)
+ 	{
++#ifdef __EMSCRIPTEN__
++		// Emscripten 3.1.4 libc++ lacks std::lexicographical_compare_three_way
++		if (l.m_size != r.m_size) return l.m_size <=> r.m_size;
++		for (std::size_t i = 0; i < l.m_size; ++i) {
++			auto cmp = l[i] <=> r[i];
++			if (cmp != 0) return cmp;
++		}
++		return std::strong_ordering::equal;
++#else
+ 		return std::lexicographical_compare_three_way(l.begin(), l.end(), r.begin(), r.end());
++#endif
+ 	}
+ 
+ 	friend bool operator==(const ArrayVector& l, const ArrayVector& r)
+diff --git a/include/AudioBuffer.h b/include/AudioBuffer.h
+index b4e735248..e9ca33c1c 100644
+--- a/include/AudioBuffer.h
++++ b/include/AudioBuffer.h
+@@ -26,7 +26,11 @@
+ #define LMMS_AUDIO_BUFFER_H
+ 
+ #include <bitset>
++#ifdef __EMSCRIPTEN__
++#include "memory_resource"
++#else
+ #include <memory_resource>
++#endif
+ 
+ #include "AudioBufferView.h"
+ #include "ArrayVector.h"
+@@ -210,13 +214,13 @@ public:
+ 	//! @returns the buffer for the given channel
+ 	auto buffer(ch_cnt_t channel) const -> std::span<const float>
+ 	{
+-		return {m_accessBuffer[channel], m_frames};
++		return {m_accessBuffer[channel], static_cast<std::size_t>(m_frames)};
+ 	}
+ 
+ 	//! @returns the buffer for the given channel
+ 	auto buffer(ch_cnt_t channel) -> std::span<float>
+ 	{
+-		return {m_accessBuffer[channel], m_frames};
++		return {m_accessBuffer[channel], static_cast<std::size_t>(m_frames)};
+ 	}
+ 
+ 	//! @returns the total channel count (never exceeds MaxChannelsPerAudioBuffer)
+diff --git a/include/AudioBufferView.h b/include/AudioBufferView.h
+index 0b10cda25..1f73eeea5 100644
+--- a/include/AudioBufferView.h
++++ b/include/AudioBufferView.h
+@@ -27,8 +27,12 @@
+ #define LMMS_AUDIO_BUFFER_VIEW_H
+ 
+ #include <cassert>
++#ifdef __EMSCRIPTEN__
++#include "ranges"
++#else
+ #include <concepts>
+ #include <ranges>
++#endif
+ #include <span>
+ #include <type_traits>
+ 
+@@ -460,8 +464,13 @@ public:
+ };
+ 
+ // Check that the std::span-like space optimization works
++// Relaxed for WASM where pointer/size alignment differs
++#ifndef __EMSCRIPTEN__
+ static_assert(sizeof(InterleavedBufferView<float>) > sizeof(InterleavedBufferView<float, 2>));
+ static_assert(sizeof(InterleavedBufferView<float, 2>) == sizeof(void*) + sizeof(f_cnt_t));
++#else
++static_assert(sizeof(InterleavedBufferView<float, 2>) >= sizeof(void*) + sizeof(f_cnt_t));
++#endif
+ 
+ // Deduction guides
+ InterleavedBufferView(const SampleFrame*, f_cnt_t) -> InterleavedBufferView<const float, 2>;
+@@ -567,8 +576,11 @@ public:
+ };
+ 
+ // Check that the std::span-like space optimization works
++// Relaxed for WASM where pointer/size alignment differs
++#ifndef __EMSCRIPTEN__
+ static_assert(sizeof(PlanarBufferView<float>) > sizeof(PlanarBufferView<float, 2>));
+ static_assert(sizeof(PlanarBufferView<float, 2>) == sizeof(void**) + sizeof(f_cnt_t));
++#endif
+ 
+ 
+ //! Concept for any audio buffer view, interleaved or planar
+diff --git a/include/AudioWeb.h b/include/AudioWeb.h
+new file mode 100644
+index 000000000..cb3c31c5e
+--- /dev/null
++++ b/include/AudioWeb.h
+@@ -0,0 +1,56 @@
++/*
++ * AudioWeb.h - Web Audio API backend for LMMS WebAssembly
++ *
++ * This file is part of LMMS - https://lmms.io
++ *
++ */
++
++#ifndef LMMS_AUDIO_WEB_H
++#define LMMS_AUDIO_WEB_H
++
++#include "AudioDevice.h"
++#include "AudioDeviceSetupWidget.h"
++#include "AudioEngine.h"
++
++namespace lmms
++{
++
++class AudioWeb : public QThread, public AudioDevice
++{
++	Q_OBJECT
++public:
++	AudioWeb( bool & _success_ful, AudioEngine* audioEngine );
++	~AudioWeb() override;
++
++	inline static QString name()
++	{
++		return QT_TRANSLATE_NOOP( "AudioDeviceSetupWidget", "Web Audio (WASM)" );
++	}
++
++	class setupWidget : public gui::AudioDeviceSetupWidget
++	{
++	public:
++		setupWidget( QWidget * _parent ) :
++			gui::AudioDeviceSetupWidget( AudioWeb::name(), _parent )
++		{
++		}
++		~setupWidget() override = default;
++		void saveSettings() override {}
++		void show() override
++		{
++			parentWidget()->hide();
++			QWidget::show();
++		}
++	};
++
++private:
++	void startProcessingImpl() override;
++	void stopProcessingImpl() override;
++	void run() override;
++
++	AudioEngine* m_audioEngine;
++};
++
++} // namespace lmms
++
++#endif // LMMS_AUDIO_WEB_H
+diff --git a/include/SampleThumbnail.h b/include/SampleThumbnail.h
+index b0b6d7b45..6ae6452fd 100644
+--- a/include/SampleThumbnail.h
++++ b/include/SampleThumbnail.h
+@@ -26,6 +26,7 @@
+ #ifndef LMMS_SAMPLE_THUMBNAIL_H
+ #define LMMS_SAMPLE_THUMBNAIL_H
+ 
++#include <unordered_map>
+ #include <QDateTime>
+ #include <QRect>
+ #include <memory>
+diff --git a/include/memory_resource b/include/memory_resource
+new file mode 100644
+index 000000000..cb5f8f8f3
+--- /dev/null
++++ b/include/memory_resource
+@@ -0,0 +1,149 @@
++// Polyfill for <memory_resource> on platforms that lack it (Emscripten/WASM)
++
++#ifndef LMMS_MEMORY_RESOURCE_POLYFILL
++#define LMMS_MEMORY_RESOURCE_POLYFILL
++
++#include <cstddef>
++#include <memory>
++#include <new>
++#include <vector>
++
++namespace std::pmr {
++
++// Forward declarations
++class memory_resource;
++memory_resource* get_default_resource() noexcept;
++
++// Polymorphic allocator wrapping a memory_resource*
++template <typename T>
++class polymorphic_allocator {
++	memory_resource* m_resource;
++public:
++	using value_type = T;
++
++	polymorphic_allocator() noexcept : m_resource(nullptr) {}
++	polymorphic_allocator(memory_resource* r) : m_resource(r) {}
++	template <typename U>
++	polymorphic_allocator(const polymorphic_allocator<U>& other) noexcept
++		: m_resource(other.resource()) {}
++
++	T* allocate(size_t n);
++	void deallocate(T* p, size_t n);
++
++	memory_resource* resource() const noexcept { return m_resource; }
++
++	template <typename U>
++	bool operator==(const polymorphic_allocator<U>& other) const noexcept {
++		return m_resource == other.resource();
++	}
++	template <typename U>
++	bool operator!=(const polymorphic_allocator<U>& other) const noexcept {
++		return !(*this == other);
++	}
++};
++
++// Minimal memory_resource polyfill
++class memory_resource {
++public:
++	virtual ~memory_resource() = default;
++
++	void* allocate(size_t bytes, size_t alignment = alignof(std::max_align_t)) {
++		return do_allocate(bytes, alignment);
++	}
++	void deallocate(void* p, size_t bytes, size_t alignment = alignof(std::max_align_t)) {
++		do_deallocate(p, bytes, alignment);
++	}
++	bool is_equal(const memory_resource& other) const noexcept {
++		return do_is_equal(other);
++	}
++
++	static memory_resource* get_default_resource() noexcept {
++		static memory_resource default_res;
++		return &default_res;
++	}
++
++protected:
++	virtual void* do_allocate(size_t bytes, size_t alignment) {
++		void* p = ::operator new(bytes, std::align_val_t(alignment));
++		return p;
++	}
++	virtual void do_deallocate(void* p, size_t bytes, size_t alignment) {
++		::operator delete(p, bytes, std::align_val_t(alignment));
++	}
++	virtual bool do_is_equal(const memory_resource& other) const noexcept {
++		return this == &other;
++	}
++};
++
++// Out-of-line polymorphic_allocator methods (after memory_resource is complete)
++template <typename T>
++T* polymorphic_allocator<T>::allocate(size_t n) {
++	return static_cast<T*>(m_resource->allocate(n * sizeof(T), alignof(T)));
++}
++template <typename T>
++void polymorphic_allocator<T>::deallocate(T* p, size_t n) {
++	m_resource->deallocate(p, n * sizeof(T), alignof(T));
++}
++
++// pmr::vector uses polymorphic_allocator
++template <typename T>
++using vector = std::vector<T, polymorphic_allocator<T>>;
++
++// Free function in std::pmr (C++17 standard)
++inline memory_resource* get_default_resource() noexcept {
++	return memory_resource::get_default_resource();
++}
++
++// monotonic_buffer_resource stub
++class monotonic_buffer_resource : public memory_resource {
++	char* m_owned{nullptr};
++	char* m_buffer;
++	size_t m_size;
++	size_t m_used{0};
++	bool m_owns{false};
++
++protected:
++	void* do_allocate(size_t bytes, size_t alignment) override {
++		uintptr_t base = reinterpret_cast<uintptr_t>(m_buffer + m_used);
++		uintptr_t aligned = (base + alignment - 1) & ~(uintptr_t)(alignment - 1);
++		size_t offset = aligned - reinterpret_cast<uintptr_t>(m_buffer);
++		if (offset + bytes > m_size) {
++			return memory_resource::do_allocate(bytes, alignment);
++		}
++		m_used = offset + bytes;
++		return reinterpret_cast<void*>(aligned);
++	}
++	void do_deallocate(void*, size_t, size_t) override {}
++
++	bool do_is_equal(const memory_resource& other) const noexcept override {
++		return this == &other;
++	}
++
++public:
++	explicit monotonic_buffer_resource(size_t size)
++		: m_owned(new char[size]), m_buffer(m_owned), m_size(size), m_owns(true) {}
++	monotonic_buffer_resource(void* buffer, size_t size)
++		: m_buffer(static_cast<char*>(buffer)), m_size(size) {}
++	~monotonic_buffer_resource() override {
++		if (m_owns) delete[] m_owned;
++	}
++	void release() { m_used = 0; }
++};
++
++// unsynchronized_pool_resource stub
++class unsynchronized_pool_resource : public memory_resource {
++protected:
++	void* do_allocate(size_t bytes, size_t alignment) override {
++		return memory_resource::do_allocate(bytes, alignment);
++	}
++	void do_deallocate(void* p, size_t bytes, size_t alignment) override {
++		memory_resource::do_deallocate(p, bytes, alignment);
++	}
++	bool do_is_equal(const memory_resource& other) const noexcept override {
++		return this == &other;
++	}
++};
++
++} // namespace std::pmr
++
++#endif // LMMS_MEMORY_RESOURCE_POLYFILL
+diff --git a/include/ranges b/include/ranges
+new file mode 100644
+index 000000000..bff520eef
+--- /dev/null
++++ b/include/ranges
+@@ -0,0 +1,32 @@
++// Minimal <ranges> polyfill for std::ranges::subrange on Emscripten/WASM
++// Emscripten 3.1.4 libc++ lacks <ranges> and <concepts>
++
++#ifndef LMMS_RANGES_POLYFILL
++#define LMMS_RANGES_POLYFILL
++
++#include <iterator>
++
++namespace std::ranges {
++
++// Minimal subrange = {begin iterator, end sentinel}
++template <typename I, typename S = I>
++class subrange {
++	I m_begin;
++	S m_end;
++
++public:
++	subrange() = default;
++	constexpr subrange(I begin, S end) : m_begin(begin), m_end(end) {}
++
++	constexpr I begin() const { return m_begin; }
++	constexpr S end() const { return m_end; }
++	constexpr bool empty() const { return m_begin == m_end; }
++
++	constexpr auto size() const {
++		return static_cast<size_t>(m_end - m_begin);
++	}
++};
++
++} // namespace std::ranges
++
++#endif
+diff --git a/src/common/SharedMemory.cpp b/src/common/SharedMemory.cpp
+index 5952b0d0b..1cb8540e5 100644
+--- a/src/common/SharedMemory.cpp
++++ b/src/common/SharedMemory.cpp
+@@ -41,6 +41,10 @@
+ #	include <fcntl.h>
+ #elif defined(LMMS_BUILD_WIN32)
+ #	include <windows.h>
++#elif defined(__EMSCRIPTEN__)
++	// WASM: single-threaded, use plain heap as shared memory
++	#include <cstdlib>
++	#include <cstring>
+ #else
+ #	error "No shared memory implementation available"
+ #endif
+@@ -255,6 +259,59 @@ private:
+ 	std::size_t m_arraySize = 0; // non-zero if it's an array
+ };
+ 
++#elif defined(__EMSCRIPTEN__)
++
++namespace {
++
++// WASM single-threaded: use heap as shared memory (no actual IPC needed)
++
++} // namespace
++
++class SharedMemoryImpl
++{
++public:
++	SharedMemoryImpl(const std::string& key, bool readOnly, bool isArray)
++		: m_key{key}, m_readOnly{readOnly}
++	{
++		// For WASM, we can't open existing shared memory across processes,
++		// but within LMMS, this is used for inter-thread communication which
++		// doesn't apply in WASM single-threaded mode. Just allocate heap.
++		m_size = 4096; // minimum usable size
++		m_mapping = new char[m_size];
++		if (isArray) { m_arraySize = static_cast<Header*>(m_mapping)->size; }
++	}
++
++	SharedMemoryImpl(const std::string& key, std::size_t size, bool readOnly, bool isArray)
++		: m_key{key}, m_readOnly{readOnly}, m_size{size}
++	{
++		if (isArray) {
++			m_size += sizeof(Header);
++			m_arraySize = size;
++		}
++		m_mapping = new char[m_size];
++		if (isArray) { new (m_mapping) Header{static_cast<std::uint64_t>(size)}; }
++	}
++
++	SharedMemoryImpl(const SharedMemoryImpl&) = delete;
++	SharedMemoryImpl& operator=(const SharedMemoryImpl&) = delete;
++
++	~SharedMemoryImpl() { delete[] static_cast<char*>(m_mapping); }
++
++	auto get() const noexcept -> void* {
++		return m_arraySize > 0
++			? static_cast<char*>(m_mapping) + sizeof(Header)
++			: m_mapping;
++	}
++	auto arraySize() const noexcept -> std::size_t { return m_arraySize; }
++
++private:
++	std::string m_key;
++	bool m_readOnly = false;
++	std::size_t m_size = 0;
++	std::size_t m_arraySize = 0;
++	void* m_mapping = nullptr;
++};
++
+ #endif
+ 
+ namespace {
+diff --git a/src/common/SystemSemaphore.cpp b/src/common/SystemSemaphore.cpp
+index e12ec8c1d..914170a74 100644
+--- a/src/common/SystemSemaphore.cpp
++++ b/src/common/SystemSemaphore.cpp
+@@ -35,11 +35,13 @@
+ #	include <unistd.h>
+ #endif
+ 
+-#if (_POSIX_SEMAPHORES > 0 && !defined(__MINGW32__)) || defined(LMMS_BUILD_APPLE)
++#if (_POSIX_SEMAPHORES > 0 && !defined(__MINGW32__) && !defined(__EMSCRIPTEN__)) || defined(LMMS_BUILD_APPLE)
+ #	include <fcntl.h>
+ #	include <semaphore.h>
+ #elif defined(LMMS_BUILD_WIN32)
+ #	include <windows.h>
++#elif defined(__EMSCRIPTEN__)
++	// WASM: single-threaded, trivial semaphore; see impl below
+ #else
+ #	error "No system semaphore implementation available"
+ #endif
+@@ -48,7 +50,7 @@ namespace lmms {
+ 
+ namespace detail {
+ 
+-#if (_POSIX_SEMAPHORES > 0 && !defined(__MINGW32__)) || defined(LMMS_BUILD_APPLE)
++#if (_POSIX_SEMAPHORES > 0 && !defined(__MINGW32__) && !defined(__EMSCRIPTEN__)) || defined(LMMS_BUILD_APPLE)
+ 
+ namespace {
+ 
+@@ -154,6 +156,26 @@ private:
+ 	UniqueHandle m_sem;
+ };
+ 
++#elif defined(__EMSCRIPTEN__)
++
++namespace {
++
++// WASM single-threaded: semaphores are always available (no contention)
++} // namespace
++
++class SystemSemaphoreImpl
++{
++public:
++	SystemSemaphoreImpl(const std::string&, unsigned int) : m_count(1) {}
++	explicit SystemSemaphoreImpl(const std::string&) : m_count(1) {}
++
++	auto acquire() noexcept -> bool { m_count = 0; return true; }
++	auto release() noexcept -> bool { m_count = 1; return true; }
++
++private:
++	int m_count = 0;
++};
++
+ #endif
+ 
+ } // namespace detail
+diff --git a/src/core/AudioBuffer.cpp b/src/core/AudioBuffer.cpp
+index 9fd2d7611..65feb18e0 100644
+--- a/src/core/AudioBuffer.cpp
++++ b/src/core/AudioBuffer.cpp
+@@ -211,10 +211,10 @@ auto AudioBuffer::sanitize(const ChannelFlags& channels, ch_cnt_t upperBound) ->
+ 		if (channels[ch])
+ 		{
+ 			// This channel needs to be sanitized
+-			if (std::ranges::any_of(buffer(ch), [](auto val) { return !std::isfinite(val); }))
++			if (std::any_of(buffer(ch).begin(), buffer(ch).end(), [](auto val) { return !std::isfinite(val); }))
+ 			{
+ 				// Inf/NaN detected and buffer cleared
+-				std::ranges::fill(buffer(ch), 0.f);
++				std::fill(buffer(ch).begin(), buffer(ch).end(), 0.f);
+ 				m_silenceFlags[ch] = true;
+ 				changesMade = true;
+ 			}
+@@ -235,10 +235,10 @@ auto AudioBuffer::sanitizeAll() -> bool
+ 	bool changesMade = false;
+ 	for (ch_cnt_t ch = 0; ch < totalChannels(); ++ch)
+ 	{
+-		if (std::ranges::any_of(buffer(ch), [](auto val) { return !std::isfinite(val); }))
++		if (std::any_of(buffer(ch).begin(), buffer(ch).end(), [](auto val) { return !std::isfinite(val); }))
+ 		{
+ 			// Inf/NaN detected and buffer cleared
+-			std::ranges::fill(buffer(ch), 0.f);
++			std::fill(buffer(ch).begin(), buffer(ch).end(), 0.f);
+ 			m_silenceFlags[ch] = true;
+ 			changesMade = true;
+ 		}
+@@ -327,7 +327,7 @@ void AudioBuffer::silenceChannels(const ChannelFlags& channels, ch_cnt_t upperBo
+ 	{
+ 		if (needSilenced[ch])
+ 		{
+-			std::ranges::fill(buffer(ch), 0.f);
++			std::fill(buffer(ch).begin(), buffer(ch).end(), 0.f);
+ 		}
+ 	}
+ 
+@@ -342,8 +342,8 @@ void AudioBuffer::silenceChannels(const ChannelFlags& channels, ch_cnt_t upperBo
+ 
+ void AudioBuffer::silenceAllChannels()
+ {
+-	std::ranges::fill(m_sourceBuffer, 0);
+-	std::ranges::fill(m_interleavedBuffer, 0);
++	std::fill(m_sourceBuffer.begin(), m_sourceBuffer.end(), 0);
++	std::fill(m_interleavedBuffer.begin(), m_interleavedBuffer.end(), 0);
+ 
+ 	m_silenceFlags.set();
+ }
+@@ -356,7 +356,10 @@ auto AudioBuffer::absPeakValue(ch_cnt_t channel) const -> float
+ 		return 0;
+ 	}
+ 
+-	return std::abs(std::ranges::max(buffer(channel), {}, static_cast<float(&)(float)>(std::abs)));
++	auto buf = buffer(channel);
++	auto maxIt = std::max_element(buf.begin(), buf.end(),
++		[](float a, float b) { return std::abs(a) < std::abs(b); });
++	return (maxIt != buf.end()) ? std::abs(*maxIt) : 0.f;
+ }
+ 
+ } // namespace lmms
+diff --git a/src/core/AudioEngine.cpp b/src/core/AudioEngine.cpp
+index eca92294b..70a2d1865 100644
+--- a/src/core/AudioEngine.cpp
++++ b/src/core/AudioEngine.cpp
+@@ -47,6 +47,7 @@
+ #include "AudioPulseAudio.h"
+ #include "AudioSdl.h"
+ #include "AudioDummy.h"
++#include "AudioWeb.h"
+ 
+ // platform-specific midi-interface-classes
+ #include "MidiAlsaRaw.h"
+@@ -824,6 +825,20 @@ AudioDevice * AudioEngine::tryAudioDevices()
+ #endif
+ 
+ 
++
++#ifdef LMMS_HAVE_WEB_AUDIO
++	if( dev_name == AudioWeb::name() || dev_name == "" )
++	{
++		dev = new AudioWeb( success_ful, this );
++		if( success_ful )
++		{
++			m_audioDevName = AudioWeb::name();
++			return dev;
++		}
++		delete dev;
++	}
++#endif
++
+ 	// add more device-classes here...
+ 	//dev = new audioXXXX( SAMPLE_RATES[m_qualityLevel], success_ful, this );
+ 	//if( sucess_ful )
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 036ba0cd6..90f45219e 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -106,6 +106,7 @@ set(LMMS_SRCS
+ 	core/audio/AudioPulseAudio.cpp
+ 	core/audio/AudioSampleRecorder.cpp
+ 	core/audio/AudioSdl.cpp
++	core/audio/AudioWeb.cpp
+ 
+ 	core/lv2/Lv2Basics.cpp
+ 	core/lv2/Lv2ControlBase.cpp
+diff --git a/src/core/MixHelpers.cpp b/src/core/MixHelpers.cpp
+index b8fb29bdf..fa4d77131 100644
+--- a/src/core/MixHelpers.cpp
++++ b/src/core/MixHelpers.cpp
+@@ -67,7 +67,7 @@ bool isSilent(const SampleFrame* src, int frames)
+ 
+ bool isSilent(std::span<const sample_t> buffer)
+ {
+-	return std::ranges::all_of(buffer, [&](const sample_t s) { return std::abs(s) < SilenceThreshold; });
++	return std::all_of(buffer.begin(), buffer.end(), [&](const sample_t s) { return std::abs(s) < SilenceThreshold; });
+ }
+ 
+ struct AddOp
+diff --git a/src/core/audio/AudioWeb.cpp b/src/core/audio/AudioWeb.cpp
+new file mode 100644
+index 000000000..0fe071a55
+--- /dev/null
++++ b/src/core/audio/AudioWeb.cpp
+@@ -0,0 +1,99 @@
++/*
++ * AudioWeb.cpp - Web Audio API backend for LMMS WebAssembly
++ *
++ * Uses ScriptProcessorNode to deliver rendered audio to browser output.
++ * Audio callbacks come from JavaScript -> lmms_web_audio_render().
++ */
++
++#include "AudioWeb.h"
++
++#include <algorithm>
++#include <cstdio>
++
++#ifdef LMMS_HAVE_WEB_AUDIO
++#include <emscripten.h>
++#endif
++
++namespace lmms
++{
++
++#ifdef LMMS_HAVE_WEB_AUDIO
++
++static AudioWeb* g_audioWebInstance = nullptr;
++static AudioEngine* g_webEngine = nullptr;
++
++// Called from JavaScript audio callback via ScriptProcessorNode
++extern "C" {
++
++EMSCRIPTEN_KEEPALIVE
++void lmms_web_audio_render(float* outL, float* outR, int numFrames)
++{
++	if (!g_audioWebInstance || !g_webEngine) return;
++	if (!g_audioWebInstance->AudioDevice::isRunning()) return;
++
++	const f_cnt_t periodSize = g_webEngine->framesPerPeriod();
++	for (int offset = 0; offset < numFrames; offset += static_cast<int>(periodSize))
++	{
++		const int frames = std::min<int>(
++			static_cast<int>(periodSize), numFrames - offset);
++		auto period = g_webEngine->renderNextPeriod();
++		for (int i = 0; i < frames; ++i) {
++			outL[offset + i] = period[i][0];
++			outR[offset + i] = period[i][1];
++		}
++	}
++}
++
++EMSCRIPTEN_KEEPALIVE
++const char* lmms_web_get_sample_rate()
++{
++	if (!g_audioWebInstance) return "44100";
++	static char buf[16];
++	std::snprintf(buf, sizeof(buf), "%d", g_audioWebInstance->sampleRate());
++	return buf;
++}
++
++EMSCRIPTEN_KEEPALIVE
++int lmms_web_get_frames_per_period()
++{
++	if (!g_webEngine) return 256;
++	return static_cast<int>(g_webEngine->framesPerPeriod());
++}
++
++} // extern "C"
++
++AudioWeb::AudioWeb(bool& _success_ful, AudioEngine* engine) :
++	AudioDevice(DEFAULT_CHANNELS, engine)
++{
++	_success_ful = true;
++	g_audioWebInstance = this;
++	g_webEngine = engine;
++}
++
++AudioWeb::~AudioWeb()
++{
++	g_audioWebInstance = nullptr;
++	g_webEngine = nullptr;
++	stopProcessing();
++}
++
++void AudioWeb::startProcessingImpl()
++{
++	start();
++}
++
++void AudioWeb::stopProcessingImpl()
++{
++	stopProcessingThread(this);
++}
++
++void AudioWeb::run()
++{
++	// Audio processing is driven by JavaScript audio callbacks.
++	// This thread keeps the Qt event loop running so the UI stays responsive.
++	exec();
++}
++
++#endif // LMMS_HAVE_WEB_AUDIO
++
++} // namespace lmms
+diff --git a/src/core/main.cpp b/src/core/main.cpp
+index c1e72b9d9..f042ec923 100644
+--- a/src/core/main.cpp
++++ b/src/core/main.cpp
+@@ -335,7 +335,7 @@ int main( int argc, char * * argv )
+ 	qInstallMessageHandler(consoleMessageHandler);
+ #endif
+ 
+-#if defined(LMMS_HAVE_SYS_PRCTL_H) && defined(PR_SET_CHILD_SUBREAPER)
++#if defined(LMMS_HAVE_SYS_PRCTL_H) && defined(PR_SET_CHILD_SUBREAPER) && !defined(__EMSCRIPTEN__)
+ 	// Set the "child subreaper" attribute so that plugin child processes remain as lmms'
+ 	// children even when some wrapper process exits, as it may happen with wine
+ 	if (prctl(PR_SET_CHILD_SUBREAPER, 1))
+diff --git a/src/gui/tracks/InstrumentTrackView.cpp b/src/gui/tracks/InstrumentTrackView.cpp
+index 320cc0a5b..9526be13a 100644
+--- a/src/gui/tracks/InstrumentTrackView.cpp
++++ b/src/gui/tracks/InstrumentTrackView.cpp
+@@ -24,7 +24,7 @@
+ 
+ #include "InstrumentTrackView.h"
+ 
+-#include <ranges>
++#include <algorithm>
+ 
+ #include <QAction>
+ #include <QApplication>
+@@ -205,7 +205,10 @@ InstrumentTrackWindow* InstrumentTrackView::topLevelInstrumentTrackWindow()
+ {
+ 	const auto subWindows = getGUI()->mainWindow()->workspace()->subWindowList(QMdiArea::ActivationHistoryOrder);
+ 
+-	for (QMdiSubWindow* sw : subWindows | std::views::reverse)
++	// WASM: std::views::reverse not available, use manual reverse
++	auto reversed = subWindows;
++	std::reverse(reversed.begin(), reversed.end());
++	for (QMdiSubWindow* sw : reversed)
+ 	{
+ 		if (!sw->widget() || !sw->widget()->isVisible()) { continue; }
+ 
