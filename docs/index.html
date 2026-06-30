@@ -14,7 +14,13 @@
 </head>
 <body>
 <div id="status"><div class="spinner"></div>Loading LMMS&hellip;</div>
+<div id="errors" style="position:absolute;bottom:0;left:0;right:0;max-height:30%;overflow:auto;background:rgba(200,0,0,0.9);color:#fff;font:11px monospace;padding:8px;display:none;z-index:999;"></div>
 <script>
+  var _errs = [];
+  function _logErr(tag, msg) { _errs.push('['+tag+'] '+msg); var e=document.getElementById('errors'); if(e){e.style.display='block';e.textContent=_errs.slice(-30).join('\n');} console.error(tag, msg); }
+  window.onerror = function(m,s,l,c,e) { _logErr('onerror', m+' @ '+s+':'+l); return false; };
+  window.addEventListener('error', function(ev) { if(ev.message && ev.message !== '') _logErr('error-ev', ev.message); });
+  window.addEventListener('unhandledrejection', function(ev) { _logErr('unhandled', ev.reason+' ('+(ev.reason||{}).stack+')'); });
   // Fix Qt WASM clipboard permission queries
   (function() {
     var orig = navigator.permissions.query.bind(navigator.permissions);
@@ -43,12 +49,12 @@
     canvas: (function() { var c = document.createElement('canvas'); c.id = 'qt-canvas'; document.body.appendChild(c); return c; })(),
     setStatus: function(text) {
       var s = document.getElementById('status');
-      if (s) s.textContent = text;
+      if (s) s.textContent = text || 'Running...';
       if (text === '') { var el = document.getElementById('status'); if (el) el.style.display = 'none'; }
     },
-    onRuntimeInitialized: function() {},
-    print: console.log.bind(console),
-    printErr: console.error.bind(console),
+    onRuntimeInitialized: function() { _logErr('info', 'Runtime initialized OK'); },
+    print: function(s) { _logErr('stdout', s); console.log(s); },
+    printErr: function(s) { _logErr('stderr', s); console.error(s); },
     instantiateWasm: function(imports, successCallback) {
       for (var mod in imports) {
         var m = imports[mod];
