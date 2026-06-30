@@ -51,6 +51,7 @@
 </script>
 <script>
   var Module = {
+    noExitRuntime: true,
     arguments: ['--allowroot', '-platform', 'wasm'],
     preRun: [function() {
       ENV.QT_LOGGING_RULES = '*.debug=false';
