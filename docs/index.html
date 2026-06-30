@@ -24,6 +24,18 @@
       return orig(desc);
     };
   })();
+  // Guard against empty/invalid CSS selectors from Qt WASM
+  (function() {
+    function bad(s) { return !s || s === '#' || /^#\s*$/.test(s); }
+    var qs = Document.prototype.querySelector;
+    Document.prototype.querySelector = function(s) { return bad(s) ? null : qs.call(this, s); };
+    var qsa = Document.prototype.querySelectorAll;
+    Document.prototype.querySelectorAll = function(s) { return bad(s) ? [] : qsa.call(this, s); };
+    var eqs = Element.prototype.querySelector;
+    Element.prototype.querySelector = function(s) { return bad(s) ? null : eqs.call(this, s); };
+    var eqsa = Element.prototype.querySelectorAll;
+    Element.prototype.querySelectorAll = function(s) { return bad(s) ? [] : eqsa.call(this, s); };
+  })();
 </script>
 <script>
   var Module = {
