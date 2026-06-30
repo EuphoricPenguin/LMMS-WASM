@@ -18,9 +18,9 @@
 <script>
   var _errs = [];
   function _logErr(tag, msg) { _errs.push('['+tag+'] '+msg); var e=document.getElementById('errors'); if(e){e.style.display='block';e.textContent=_errs.slice(-30).join('\n');} console.error(tag, msg); }
-  window.onerror = function(m,s,l,c,e) { _logErr('onerror', m+' @ '+s+':'+l); return false; };
-  window.addEventListener('error', function(ev) { if(ev.message && ev.message !== '') _logErr('error-ev', ev.message); });
-  window.addEventListener('unhandledrejection', function(ev) { _logErr('unhandled', ev.reason+' ('+(ev.reason||{}).stack+')'); });
+  window.onerror = function(m,s,l,c,e) { _logErr('onerror', m+' @ '+s+':'+l); if(e&&e.stack) _logErr('onerror-stack', e.stack); return false; };
+  window.addEventListener('error', function(ev) { if(ev.message && ev.message !== '') _logErr('error-ev', ev.message+' @ '+ev.filename+':'+ev.lineno); if(ev.error&&ev.error.stack) _logErr('error-stack', ev.error.stack); });
+  window.addEventListener('unhandledrejection', function(ev) { _logErr('unhandled', ev.reason); if(ev.reason&&ev.reason.stack) _logErr('unhandled-stack', ev.reason.stack); });
   // Fix Qt WASM clipboard permission queries
   (function() {
     var orig = navigator.permissions.query.bind(navigator.permissions);
