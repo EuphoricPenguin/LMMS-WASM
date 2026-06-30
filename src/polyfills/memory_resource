@@ -1,0 +1,162 @@
+/*
+ * Polyfill for <memory_resource> for Emscripten/WASM (no standard library support)
+ *
+ * Copyright (c) 2024 LMMS WASM contributors
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ */
+
+#ifndef LMMS_MEMORY_RESOURCE_POLYFILL
+#define LMMS_MEMORY_RESOURCE_POLYFILL
+
+#include <cstddef>
+#include <memory>
+#include <new>
+#include <vector>
+
+namespace std::pmr {
+
+// Forward declarations
+class memory_resource;
+memory_resource* get_default_resource() noexcept;
+
+// Polymorphic allocator wrapping a memory_resource*
+template <typename T>
+class polymorphic_allocator {
+	memory_resource* m_resource;
+public:
+	using value_type = T;
+
+	polymorphic_allocator() noexcept : m_resource(nullptr) {}
+	polymorphic_allocator(memory_resource* r) : m_resource(r) {}
+	template <typename U>
+	polymorphic_allocator(const polymorphic_allocator<U>& other) noexcept
+		: m_resource(other.resource()) {}
+
+	T* allocate(size_t n);
+	void deallocate(T* p, size_t n);
+
+	memory_resource* resource() const noexcept { return m_resource; }
+
+	template <typename U>
+	bool operator==(const polymorphic_allocator<U>& other) const noexcept {
+		return m_resource == other.resource();
+	}
+	template <typename U>
+	bool operator!=(const polymorphic_allocator<U>& other) const noexcept {
+		return !(*this == other);
+	}
+};
+
+// Minimal memory_resource polyfill
+class memory_resource {
+public:
+	virtual ~memory_resource() = default;
+
+	void* allocate(size_t bytes, size_t alignment = alignof(std::max_align_t)) {
+		return do_allocate(bytes, alignment);
+	}
+	void deallocate(void* p, size_t bytes, size_t alignment = alignof(std::max_align_t)) {
+		do_deallocate(p, bytes, alignment);
+	}
+	bool is_equal(const memory_resource& other) const noexcept {
+		return do_is_equal(other);
+	}
+
+	static memory_resource* get_default_resource() noexcept {
+		static memory_resource default_res;
+		return &default_res;
+	}
+
+protected:
+	virtual void* do_allocate(size_t bytes, size_t alignment) {
+		void* p = ::operator new(bytes, std::align_val_t(alignment));
+		return p;
+	}
+	virtual void do_deallocate(void* p, size_t bytes, size_t alignment) {
+		::operator delete(p, bytes, std::align_val_t(alignment));
+	}
+	virtual bool do_is_equal(const memory_resource& other) const noexcept {
+		return this == &other;
+	}
+};
+
+// Out-of-line polymorphic_allocator methods (after memory_resource is complete)
+template <typename T>
+T* polymorphic_allocator<T>::allocate(size_t n) {
+	return static_cast<T*>(m_resource->allocate(n * sizeof(T), alignof(T)));
+}
+template <typename T>
+void polymorphic_allocator<T>::deallocate(T* p, size_t n) {
+	m_resource->deallocate(p, n * sizeof(T), alignof(T));
+}
+
+// pmr::vector uses polymorphic_allocator
+template <typename T>
+using vector = std::vector<T, polymorphic_allocator<T>>;
+
+// Free function in std::pmr (C++17 standard)
+inline memory_resource* get_default_resource() noexcept {
+	return memory_resource::get_default_resource();
+}
+
+// monotonic_buffer_resource stub
+class monotonic_buffer_resource : public memory_resource {
+	char* m_owned{nullptr};
+	char* m_buffer;
+	size_t m_size;
+	size_t m_used{0};
+	bool m_owns{false};
+
+protected:
+	void* do_allocate(size_t bytes, size_t alignment) override {
+		uintptr_t base = reinterpret_cast<uintptr_t>(m_buffer + m_used);
+		uintptr_t aligned = (base + alignment - 1) & ~(uintptr_t)(alignment - 1);
+		size_t offset = aligned - reinterpret_cast<uintptr_t>(m_buffer);
+		if (offset + bytes > m_size) {
+			return memory_resource::do_allocate(bytes, alignment);
+		}
+		m_used = offset + bytes;
+		return reinterpret_cast<void*>(aligned);
+	}
+	void do_deallocate(void*, size_t, size_t) override {}
+
+	bool do_is_equal(const memory_resource& other) const noexcept override {
+		return this == &other;
+	}
+
+public:
+	explicit monotonic_buffer_resource(size_t size)
+		: m_owned(new char[size]), m_buffer(m_owned), m_size(size), m_owns(true) {}
+	monotonic_buffer_resource(void* buffer, size_t size)
+		: m_buffer(static_cast<char*>(buffer)), m_size(size) {}
+	~monotonic_buffer_resource() override {
+		if (m_owns) delete[] m_owned;
+	}
+	void release() { m_used = 0; }
+};
+
+// unsynchronized_pool_resource stub
+class unsynchronized_pool_resource : public memory_resource {
+protected:
+	void* do_allocate(size_t bytes, size_t alignment) override {
+		return memory_resource::do_allocate(bytes, alignment);
+	}
+	void do_deallocate(void* p, size_t bytes, size_t alignment) override {
+		memory_resource::do_deallocate(p, bytes, alignment);
+	}
+	bool do_is_equal(const memory_resource& other) const noexcept override {
+		return this == &other;
+	}
+};
+
+} // namespace std::pmr
+
+#endif // LMMS_MEMORY_RESOURCE_POLYFILL

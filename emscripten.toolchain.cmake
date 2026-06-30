@@ -1,4 +1,7 @@
 # Emscripten CMake toolchain for LMMS WebAssembly build
+# Copyright (c) 2024 LMMS WASM contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
 # Requires Qt 5 built for WebAssembly
 
 set(CMAKE_SYSTEM_NAME Linux)

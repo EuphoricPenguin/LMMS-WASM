@@ -1,0 +1,46 @@
+/*
+ * Minimal <ranges> polyfill for Emscripten/WASM (no standard library support)
+ *
+ * Emscripten 3.1.4 libc++ lacks <ranges> and <concepts>.
+ *
+ * Copyright (c) 2024 LMMS WASM contributors
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ */
+
+#ifndef LMMS_RANGES_POLYFILL
+#define LMMS_RANGES_POLYFILL
+
+#include <iterator>
+
+namespace std::ranges {
+
+// Minimal subrange = {begin iterator, end sentinel}
+template <typename I, typename S = I>
+class subrange {
+	I m_begin;
+	S m_end;
+
+public:
+	subrange() = default;
+	constexpr subrange(I begin, S end) : m_begin(begin), m_end(end) {}
+
+	constexpr I begin() const { return m_begin; }
+	constexpr S end() const { return m_end; }
+	constexpr bool empty() const { return m_begin == m_end; }
+
+	constexpr auto size() const {
+		return static_cast<size_t>(m_end - m_begin);
+	}
+};
+
+} // namespace std::ranges
+
+#endif

@@ -1,0 +1,103 @@
+name: Build LMMS WASM
+
+# CI workflow for building LMMS WebAssembly from source.
+# Runs on manual trigger (workflow_dispatch) or when build files change.
+#
+# The build is resource-intensive (~30-60 min) and produces ~20 MB artifacts.
+# This is separate from the deploy-pages workflow.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/**'
+      - '*.patch'
+      - '*.cmake'
+      - '*-wrapper.sh'
+      - 'build-wasm.sh'
+      - 'Dockerfile'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Checkout LMMS source
+        uses: actions/checkout@v4
+        with:
+          repository: LMMS/lmms
+          path: lmms
+          ref: 45970566f
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.4
+          actions-cache-folder: emsdk-cache
+
+      - name: Cache Qt5 WASM
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: qt5-wasm
+          key: qt5-wasm-5.15.16-v1
+
+      - name: Build Qt5 for WASM
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          wget -nv https://download.qt.io/archive/qt/5.15/5.15.16/submodules/qtbase-everywhere-opensource-src-5.15.16.tar.xz
+          wget -nv https://download.qt.io/archive/qt/5.15/5.15.16/submodules/qtsvg-everywhere-opensource-src-5.15.16.tar.xz
+          wget -nv https://download.qt.io/archive/qt/5.15/5.15.16/submodules/qtxmlpatterns-everywhere-opensource-src-5.15.16.tar.xz
+          tar xf qtbase-everywhere-opensource-src-5.15.16.tar.xz
+          tar xf qtsvg-everywhere-opensource-src-5.15.16.tar.xz
+          tar xf qtxmlpatterns-everywhere-opensource-src-5.15.16.tar.xz
+          cd qtbase-everywhere-src-5.15.16
+          ./configure \
+            -xplatform wasm-emscripten \
+            -confirm-license -opensource \
+            -nomake examples -nomake tests \
+            -no-feature-thread -no-dbus -no-ssl -no-cups \
+            -no-gui -widgets \
+            -prefix "$PWD/../qt5-wasm"
+          make -j$(nproc) && make install
+          cd ../qtsvg-everywhere-src-5.15.16
+          ../qt5-wasm/bin/qmake && make -j$(nproc) && make install
+          cd ../qtxmlpatterns-everywhere-src-5.15.16
+          ../qt5-wasm/bin/qmake && make -j$(nproc) && make install
+
+      - name: Apply WASM patch
+        run: |
+          cp src/polyfills/memory_resource lmms/include/memory_resource
+          cp src/polyfills/ranges lmms/include/ranges
+          cd lmms && git apply ../lmms-wasm.patch
+
+          # Also ensure AudioWeb files are present
+          cp ../src/AudioWeb.h include/AudioWeb.h
+          cp ../src/AudioWeb.cpp src/core/audio/AudioWeb.cpp
+
+      - name: Build LMMS
+        env:
+          QT5_WASM_PREFIX: ${{ github.workspace }}/qt5-wasm
+        run: |
+          mkdir -p build && cd build
+          cmake ../lmms \
+            -DCMAKE_TOOLCHAIN_FILE=../emscripten.toolchain.cmake \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=../em++-wrapper.sh \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWANT_QT5=ON \
+            -GNinja
+          cmake --build . --target lmms -j$(nproc)
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lmms-wasm
+          path: |
+            build/lmms.wasm
+            build/lmms.js

@@ -1,1 +1,14 @@
+# Build outputs
+build/
 *.tar.gz
+*.bak
+!docs/lmms.wasm
+!docs/lmms.js
+
+# Qt source
+qt5-wasm/
+
+# IDE
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,39 @@
+LMMS WebAssembly Port
+=====================
+
+This project is a WebAssembly port of LMMS (Linux MultiMedia Studio).
+
+The original LMMS source code is:
+  Copyright (c) 2004-2024 LMMS developers and contributors
+  Licensed under GPLv2 — https://github.com/LMMS/lmms
+
+Modifications for WebAssembly compatibility and the Web Audio backend
+(AudioWeb.h, AudioWeb.cpp) are:
+  Copyright (c) 2024 LMMS WASM contributors
+  Licensed under GPLv2
+
+C++ standard library polyfills (memory_resource, ranges) are:
+  Copyright (c) 2024 LMMS WASM contributors
+  Licensed under GPLv2
+
+Build scripts, HTML wrappers, CMake toolchains, and GitHub Actions workflows
+are:
+  Copyright (c) 2024 LMMS WASM contributors
+  Licensed under GPLv2
+
+Third-party Components
+----------------------
+
+Qt 5.15.16 — Copyright (c) 2024 The Qt Company Ltd.
+  Available under LGPLv3/GPLv2 from https://www.qt.io/
+
+libsndfile — Copyright (c) 1999-2011 Erik de Castro Lopo
+  Available under LGPLv2.1 from https://github.com/libsndfile/libsndfile
+
+libsamplerate — Copyright (c) 2002-2016 Erik de Castro Lopo
+  Available under BSD 2-Clause from https://github.com/libsndfile/libsamplerate
+
+FFTW3 — Copyright (c) 2003 Matteo Frigo, Copyright (c) 2003 Massachusetts Institute of Technology
+  Available under GPLv2+ from https://www.fftw.org/
+
+Emscripten SDK — Available under MIT License from https://github.com/emscripten-core/emscripten
