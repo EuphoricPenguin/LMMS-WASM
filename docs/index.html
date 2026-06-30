@@ -59,7 +59,19 @@
       if (text === '') { var el = document.getElementById('status'); if (el) el.style.display = 'none'; }
     },
     onAbort: function() { _logErr('abort', 'Suppressed abort'); },
-    onRuntimeInitialized: function() { _logErr('info', 'Runtime initialized OK'); },
+    onRuntimeInitialized: function() {
+      _logErr('info', 'Runtime initialized OK');
+      var origMain = Module._main;
+      if (origMain) {
+        Module._main = function() {
+          try { return origMain.apply(this, arguments); }
+          catch(e) {
+            _logErr('main-err', 'Caught: '+e.message);
+            if (!(e instanceof WebAssembly.RuntimeError)) throw e;
+          }
+        };
+      }
+    },
     print: function(s) { _logErr('stdout', s); console.log(s); },
     printErr: function(s) {
       if (s === 'Aborted()' || s.indexOf('Aborted') === 0) { _logErr('stderr', s+' (suppressed)'); return; }
