@@ -51,10 +51,11 @@
 </script>
 <script>
   var Module = {
-    arguments: ['--allowroot'],
+    arguments: ['--allowroot', '-platform', 'wasm'],
     preRun: [function() {
       ENV.QT_LOGGING_RULES = '*.debug=false';
       ENV.QT_QPA_PLATFORM = 'wasm';
+      ENV.QT_QPA_FONTDIR = '/fonts';
     }],
     canvas: (function() { var c = document.createElement('canvas'); c.id = 'qt-canvas'; document.body.appendChild(c); return c; })(),
     setStatus: function(text) {
