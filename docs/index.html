@@ -52,6 +52,10 @@
 <script>
   var Module = {
     arguments: ['--allowroot'],
+    preRun: [function() {
+      ENV.QT_LOGGING_RULES = '*.debug=false';
+      ENV.QT_QPA_PLATFORM = 'wasm';
+    }],
     canvas: (function() { var c = document.createElement('canvas'); c.id = 'qt-canvas'; document.body.appendChild(c); return c; })(),
     setStatus: function(text) {
       var s = document.getElementById('status');
@@ -93,10 +97,10 @@
         }
       }
       WebAssembly.instantiateStreaming
-        ? WebAssembly.instantiateStreaming(fetch('lmms.wasm'), imports).then(
+        ? WebAssembly.instantiateStreaming(fetch('lmms.wasm?v=patched'), imports).then(
             function(r) { successCallback(r.instance, r.module); },
             function(e) { Module.printErr('WASM instantiation failed: ' + e); throw e; })
-        : WebAssembly.instantiate(fetch('lmms.wasm').then(function(r) { return r.arrayBuffer(); }), imports).then(
+        : WebAssembly.instantiate(fetch('lmms.wasm?v=patched').then(function(r) { return r.arrayBuffer(); }), imports).then(
             function(r) { successCallback(r.instance, r.module); },
             function(e) { Module.printErr('WASM instantiation failed: ' + e); throw e; });
       return {};
