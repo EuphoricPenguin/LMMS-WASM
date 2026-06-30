@@ -37,6 +37,37 @@
     onRuntimeInitialized: function() {},
     print: console.log.bind(console),
     printErr: console.error.bind(console),
+    instantiateWasm: function(imports, successCallback) {
+      for (var mod in imports) {
+        var m = imports[mod];
+        if (m.__emval_call) {
+          var _orig = m.__emval_call;
+          m.__emval_call = function(h, c, t, v) {
+            try { return _orig(h, c, t, v); } catch(e) { return 0; }
+          };
+        }
+        if (m.__emval_call_method) {
+          var _orig2 = m.__emval_call_method;
+          m.__emval_call_method = function(ca, h, n, d, a) {
+            try { return _orig2(ca, h, n, d, a); } catch(e) { return 0; }
+          };
+        }
+        if (m.__emval_call_void_method) {
+          var _orig3 = m.__emval_call_void_method;
+          m.__emval_call_void_method = function(ca, h, n, a) {
+            try { _orig3(ca, h, n, a); } catch(e) {}
+          };
+        }
+      }
+      WebAssembly.instantiateStreaming
+        ? WebAssembly.instantiateStreaming(fetch('lmms.wasm'), imports).then(
+            function(r) { successCallback(r.instance, r.module); },
+            function(e) { Module.printErr('WASM instantiation failed: ' + e); throw e; })
+        : WebAssembly.instantiate(fetch('lmms.wasm').then(function(r) { return r.arrayBuffer(); }), imports).then(
+            function(r) { successCallback(r.instance, r.module); },
+            function(e) { Module.printErr('WASM instantiation failed: ' + e); throw e; });
+      return {};
+    },
   };
 </script>
 <script src="lmms.js"></script>
