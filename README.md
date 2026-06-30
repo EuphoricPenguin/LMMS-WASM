@@ -1,3 +1,5 @@
+**The following is an experimental port using DeepSeek V4 Pro and OpenHands to evaluate model performance.**
+
 # LMMS WebAssembly
 
 WebAssembly port of [LMMS](https://github.com/LMMS/lmms) (Linux MultiMedia Studio) — a
